@@ -42,6 +42,11 @@
 
 extern const uint8_t qjsc_repl[];
 extern const uint32_t qjsc_repl_size;
+
+static int qjs__argc;
+static char **qjs__argv;
+
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
 extern const uint8_t qjsc_standalone[];
 extern const uint32_t qjsc_standalone_size;
 
@@ -50,10 +55,6 @@ extern const uint32_t qjsc_standalone_size;
 static const char trailer_magic[] = "quickjs2";
 static const int trailer_magic_size = sizeof(trailer_magic) - 1;
 static const int trailer_size = TRAILER_SIZE;
-
-static int qjs__argc;
-static char **qjs__argv;
-
 
 static bool is_standalone(const char *exe)
 {
@@ -103,6 +104,7 @@ static JSValue load_standalone_module(JSContext *ctx)
     JS_FreeValue(ctx, obj);
     return JS_GetModuleNamespace(ctx, m);
 }
+#endif
 
 static int eval_buf(JSContext *ctx, const void *buf, int buf_len,
                     const char *filename, int eval_flags)
@@ -387,9 +389,11 @@ void help(int exit_status)
            "-T  --trace        trace memory allocation\n"
            "-d  --dump         dump the memory usage stats\n"
            "-D  --dump-flags   flags for dumping debug data (see DUMP_* defines)\n"
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
            "-c  --compile FILE compile the given JS file as a standalone executable\n"
            "-o  --out FILE     output file for standalone executables\n"
            "    --exe          select the executable to use as the base, defaults to the current one\n"
+#endif
            "    --memory-limit n       limit the memory usage to 'n' Kbytes\n"
            "    --stack-size n         limit the stack size to 'n' Kbytes\n"
            "-q  --quit         just instantiate the interpreter and quit\n", JS_GetVersion());
@@ -400,18 +404,20 @@ int main(int argc, char **argv)
 {
     JSRuntime *rt;
     JSContext *ctx;
-    JSValue ret = JS_UNDEFINED;
     struct trace_malloc_data trace_data = { NULL };
     int r = 0;
     int optind = 1;
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
+    JSValue ret = JS_UNDEFINED;
     char exebuf[JS__PATH_MAX];
     size_t exebuf_size = sizeof(exebuf);
     char *compile_file = NULL;
     char *exe = NULL;
-    char *expr = NULL;
-    char *dump_flags_str = NULL;
     char *out = NULL;
     int standalone = 0;
+#endif
+    char *expr = NULL;
+    char *dump_flags_str = NULL;
     int interactive = 0;
     int dump_memory = 0;
     int dump_flags = 0;
@@ -428,12 +434,14 @@ int main(int argc, char **argv)
     qjs__argc = argc;
     qjs__argv = argv;
 
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
     /* check if this is a standalone executable */
 
     if (!js_exepath(exebuf, &exebuf_size) && is_standalone(exebuf)) {
         standalone = 1;
         goto start;
     }
+#endif
 
     dump_flags_str = getenv("QJS_DUMP_FLAGS");
     dump_flags = dump_flags_str ? strtol(dump_flags_str, NULL, 16) : 0;
@@ -549,6 +557,7 @@ int main(int argc, char **argv)
                 stack_size = parse_limit(optarg);
                 break;
             }
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
             if (opt == 'c' || !strcmp(longopt, "compile")) {
                 if (!optarg) {
                     if (optind >= argc) {
@@ -582,6 +591,7 @@ int main(int argc, char **argv)
                 exe = optarg;
                 break;
             }
+#endif
             if (opt) {
                 fprintf(stderr, "qjs: unknown option '-%c'\n", opt);
             } else {
@@ -591,10 +601,12 @@ int main(int argc, char **argv)
         }
     }
 
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
     if (compile_file && !out)
         help(1);
 
 start:
+#endif
 
     if (trace_memory) {
         js_trace_malloc_init(&trace_data);
@@ -650,6 +662,7 @@ start:
                 goto fail;
         }
 
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
         if (standalone) {
             JSValue ns = load_standalone_module(ctx);
             if (JS_IsException(ns))
@@ -678,6 +691,9 @@ start:
             JS_FreeValue(ctx, args[1]);
             JS_FreeValue(ctx, args[2]);
         } else if (expr) {
+#else
+        if (expr) {
+#endif
             int flags = module ? JS_EVAL_TYPE_MODULE : 0;
             if (eval_buf(ctx, expr, strlen(expr), "<cmdline>", flags))
                 goto fail;
@@ -694,6 +710,7 @@ start:
             JS_SetHostPromiseRejectionTracker(rt, NULL, NULL);
             js_std_eval_binary(ctx, qjsc_repl, qjsc_repl_size, 0);
         }
+#if !defined(EMSCRIPTEN) && !defined(__wasi__)
         if (standalone || compile_file) {
             if (JS_IsException(ret)) {
                 r = 1;
@@ -704,6 +721,9 @@ start:
         } else {
             r = js_std_loop(ctx);
         }
+#else
+        r = js_std_loop(ctx);
+#endif
         if (r) {
             js_std_dump_error(ctx);
             goto fail;
